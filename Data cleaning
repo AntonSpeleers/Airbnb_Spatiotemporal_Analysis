@@ -5,7 +5,7 @@ from datetime import datetime
 import ast
 from collections import Counter
 
-#insert file_path for the data
+# insert file_path for the data
 file_path = 'C:/Users/anton/Documents/2de_master/Thesis/Code/analysis/Data/2. airbnb_data/Paris/Paris all detailed listings/Paris_Q1_detailed_listings.xlsx'
 dataframe1= pd.read_excel(file_path)
 
