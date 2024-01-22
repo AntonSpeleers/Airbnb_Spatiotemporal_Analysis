@@ -1,5 +1,337 @@
 import pandas as pd
 import numpy as np 
+import re
+from datetime import datetime 
+import ast
+from collections import Counter
+
 #insert file_path for the data
 file_path = 'C:/Users/anton/Documents/2de_master/Thesis/Code/analysis/Data/2. airbnb_data/Paris/Paris all detailed listings/Paris_Q1_detailed_listings.xlsx'
 dataframe1= pd.read_excel(file_path)
+
+#decided that these columns can be dropped from the datasset, because they do not contribute additional value
+columns_to_drop =["id","name","description","host_location","host_thumbnail_url","host_name","bathrooms",
+                  "listing_url","scrape_id","last_scraped", "host_picture_url","host_url", "host_has_profile_pic", 
+                  "host_verifications","source","calendar_last_scraped","license","picture_url","host_about",
+                             "neighbourhood","neighbourhood_group_cleansed","minimum_minimum_nights",
+                             "maximum_minimum_nights","minimum_maximum_nights","maximum_maximum_nights",
+                             "minimum_nights_avg_ntm","maximum_nights_avg_ntm","calendar_updated",
+                             "neighborhood_overview","host_neighbourhood", "host_acceptance_rate"]
+dataframe1 = dataframe1.drop(columns_to_drop, axis=1)
+
+#solving trailing white space problem
+string_columns = dataframe1.select_dtypes(include='object').columns.tolist()
+for i in string_columns:
+    dataframe1[i] = dataframe1[i].str.strip()
+
+#missing values have always been checked with the function: print(dataframe1.isnull().mean()) 
+
+#host_repsonse_time, filling in the empty ones with "unknown"
+dataframe1.host_response_time.fillna("unknown", inplace=True)
+dataframe1.host_response_time.value_counts(normalize=True)
+
+#adapting the host_response_rate column to better fit
+# Removing the % sign from the host_response_rate string and converting to an integer
+dataframe1.host_response_rate = dataframe1.host_response_rate.str[:-1].astype('float64')
+# Bin into four categories
+dataframe1.host_response_rate = pd.cut(dataframe1.host_response_rate, bins=[0, 50, 90, 99, 100], labels=['0-49%', '50-89%', '90-99%', '100%'], include_lowest=True)
+# Converting to string
+dataframe1.host_response_rate = dataframe1.host_response_rate.astype('str')
+# Replace nulls with 'unknown'
+dataframe1.host_response_rate.replace('nan', 'unknown', inplace=True)
+
+#these rows do not have that big of a missing value amount so we just delete the missing value rows here
+col = ["host_since","host_identity_verified","host_listings_count","host_total_listings_count","host_is_superhost"]
+for column in col:
+    dataframe1.dropna(subset=[column], inplace=True)
+
+# Category counts
+dataframe1.host_response_rate.value_counts()
+#fill out all NaN within string columns with ''
+for column in string_columns:
+    dataframe1[column] = dataframe1[column].fillna("")   
+
+#fixing the "bathroom_text" column to only numbers and renaming it
+def extract_numeric(value):
+    numeric_part = re.search(r'\d+\.\d+|\d+', str(value))
+    return float(numeric_part.group()) if numeric_part else None
+dataframe1['bathrooms_text'] = dataframe1['bathrooms_text'].apply(extract_numeric)
+dataframe1.rename(columns={'bathrooms_text': 'bathrooms'}, inplace=True)
+
+#adding a column with the information if a listing has a review or not
+dataframe1['zero_reviews'] = dataframe1['number_of_reviews'] == 0
+    
+#delete those that have no information about both beds and bedrooms
+dataframe1.dropna(subset=['beds', 'bedrooms'], how='all', inplace=True)
+
+#dropping those with +4 bedrooms (outliers) and no information about bedroom and between 1-4 beds is a studio so 0 bedrooms
+dataframe1.loc[(dataframe1['bedrooms'].isnull()) & (dataframe1['beds'].between(1, 4)), 'bedrooms'] = 0
+dataframe1.drop(dataframe1[(dataframe1['bedrooms'].isnull()) & (dataframe1['beds'] > 4)].index, inplace=True)
+
+#fill in all the other empty values with the amount of bedrooms, this is a good estimate
+dataframe1['beds'].fillna(dataframe1['bedrooms'], inplace=True)
+
+#dropping those that still have no bedroom amount 
+dataframe1.dropna(subset=["bedrooms"], inplace=True)
+
+#dropping those that still have no bathroom amount 
+dataframe1.dropna(subset=["bathrooms"], inplace=True)
+
+#Reconstructing the first_review column into a more user friendly column
+dataframe1['first_review'] = pd.to_datetime(dataframe1['first_review']) 
+# Calculating the number of days
+dataframe1['days_since_first_review'] = (datetime(2024, 1, 20) - dataframe1['first_review']).dt.days
+# Printing descriptives
+#dataframe1.hist(['days_since_first_review'], figsize=(15,5), bins=[0, 1*365, 2*365, 3*365, 4*365, 5*365, 6*365, 7*365, 8*365, 10*365, 11*365]), 9*365
+#DOING Binning time since last review
+dataframe1['days_since_first_first_review'] = pd.qcut(dataframe1['days_since_first_review'], q=5,
+                              labels=['Extremely active', 'Very active', 'Active', 'Inactive', 'Slumbering'])
+
+#Reconstructing the last_review column into a more user friendly column
+dataframe1['last_review'] = pd.to_datetime(dataframe1['last_review']) 
+# Calculating the number of days
+dataframe1['days_since_last_review'] = (datetime(2024, 1, 20) - dataframe1['last_review']).dt.days
+# Printing descriptives
+#dataframe1.hist(['days_since_last_review'], figsize=(15,5), bins=[0, 1*365, 2*365, 3*365, 4*365, 5*365, 6*365, 7*365, 8*365, 10*365, 11*365]), 9*365
+#DOING Binning time since last review
+dataframe1['days_since_last_last_review'] = pd.qcut(dataframe1['days_since_last_review'], q=5,
+                              labels=['Extremely active', 'Very active', 'Active', 'Inactive', 'Slumbering'])
+
+#Reconstructing the host_since column into a more user friendly column
+dataframe1['host_since'] = pd.to_datetime(dataframe1['host_since']) 
+# Calculating the number of days
+dataframe1['days_since_host'] = (datetime(2024, 1, 20) - dataframe1['host_since']).dt.days
+# Printing descriptives
+#dataframe1.hist(['days_since_host'], figsize=(15,5), bins=[0, 1*365, 2*365, 3*365, 4*365, 5*365, 6*365, 7*365, 8*365, 10*365, 11*365]), 9*365
+#DOING Binning time since last review
+dataframe1['days_since_host_host'] = pd.qcut(dataframe1['days_since_host'], q=5,
+                              labels=['Extremely active', 'Very active', 'Active', 'Inactive', 'Slumbering'])
+
+#Simplifying the property_types in to 4 categories
+dataframe1.property_type.replace({
+    'Barn': 'House',
+    'Boat': 'Other',
+    'Bus': 'Other',
+    'Camper/RV': 'Other',
+    'Casa particular': 'House',
+    'Cave': 'Other',
+    'Dome': 'Other',
+    'Earthen home': 'House',
+    'Entire bed and breakfast': 'Hotel',    
+    'Entire bungalow': 'House',
+    'Entire condo': 'Apartmen',
+    'Entire guesthouse': 'House',
+    'Entire home': 'House',
+    'Entire guest suite': 'Apartment',
+    'Entire rental unit': 'Apartment',
+    'Entire loft': 'Apartment',
+    'Entire home/apt': 'House',
+    'Entire place': 'House',
+    'Entire serviced apartment': 'Apartment',
+    'Entire townhouse': 'House',
+    'Entire villa': 'House',
+    'Entire vacation home': 'House',
+    'Floor': 'Other',
+    'Houseboat': 'Other',
+    'Private room': 'Apartment',
+    'Island': 'Other',
+    'Private room in bed and breakfast': 'Hotel',    
+    'Private room in boat': 'Other',
+    'Private room in casa particular': 'House',
+    'Private room in condo': 'Apartment',
+    'Private room in guest suite': 'Apartment',
+    'Private room in earthen home': 'House',
+    'Private room in home': 'House',
+    'Private room in guesthouse': 'House',
+    'Private room in loft': 'Apartment',
+    'Private room in hostel': 'Hotel',
+    'Private room in rental unit': 'Apartment',
+    'Private room in townhouse': 'House',
+    'Private room in tiny home': 'House',
+    'Private room in serviced apartment': 'Apartment',
+    'Room in bed and breakfast': 'Hotel',
+    'Private room in villa': 'House',
+    'Room in serviced apartment': 'Apartment',
+    'Room in boutique hotel': 'Hotel',
+    'Room in hotel': 'Hotel',
+    'Room in hostel': 'Hotel',
+    'Shared room in bed and breakfast': 'Hotel',
+    'Shared room in boutique hotel': 'Hotel',
+    'Shared room in cabin': 'Other',
+    'Shared room in boat': 'Other',
+    'Shared room in condo': 'Apartment',
+    'Shared room in farm stay': 'Other',
+    'Shared room in guesthouse': 'House',
+    'Shared room in casa particular': 'House',
+    'Shared room in ice dome': 'Other',
+    'Shared room in home': 'House',
+    'Shared room in hostel': 'Hotel',
+    'Shared room in hotel': 'Hotel',
+    'Shared room in rental unit': 'Apartment',
+    'Tiny home': 'House',
+    'Shared room in loft': 'Apartment',
+    'Shared room in townhouse': 'House',
+    'Shared room in tiny home': 'House',
+    }, inplace=True)
+
+# Replacing other categories with 'other'
+dataframe1.loc[~dataframe1.property_type.isin(['House', 'Apartment','Hotel']), 'property_type'] = 'Other'
+#dataframe1['property_type'].value_counts()
+
+#changing the name from neighbourhoud_cleansed to neighbourhood
+dataframe1.rename(columns={'neighbourhood_cleansed': 'neighbourhood'}, inplace=True)
+
+#convert the necessary columns to a boolean type, which is easier to use
+columns_to_convert = ['host_is_superhost', 'instant_bookable', 'host_identity_verified',"has_availability"] 
+for column in columns_to_convert:
+    dataframe1[column] = dataframe1[column].replace({'f': False, 't': True}).astype(bool)
+
+#The next rows will go throught the chances made too the amenities column
+# Convert the string representation of amenitie lists to actual lists
+dataframe1["amenities"] = dataframe1["amenities"].apply(ast.literal_eval)
+
+#making a unique list out of all the different kind of amenities that there are
+unique_items_set = set.union(*dataframe1["amenities"].apply(set))
+print(unique_items_set)
+print(len(unique_items_set)) #first we come to around 5800 different amenities
+
+#with the code down below we will simplify the amenities to reduce the amount of amenities
+
+oven_items_set = {item for item in unique_items_set if 'oven' in item.lower()}
+def replace_oven_items(item_list):
+    return ['oven' if item in oven_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_oven_items)
+
+soap_items_set = {item for item in unique_items_set if 'soap' in item.lower()}
+def replace_soap_items(item_list):
+    return ['soap' if item in soap_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_soap_items)
+
+shampoo_items_set = {item for item in unique_items_set if 'shampoo' in item.lower()}
+def replace_shampoo_items(item_list):
+    return ['shampoo' if item in shampoo_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_shampoo_items)
+
+wifi_items_set = {item for item in unique_items_set if 'wifi' in item.lower()}
+def replace_wifi_items(item_list):
+    return ['wifi' if item in wifi_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_wifi_items)
+
+special_items_set = {item for item in unique_items_set if any(keyword in item for keyword in ['Netflix', 'Disney+', 'Amazon Prime'])}
+def replace_and_add_broadcast(item_list):
+    # Replace items from special_items_set with 'Broadcast'
+    item_list = ['broadcast' if item in special_items_set else item for item in item_list]
+    # Add 'TV' to the list if modified
+    modified = any(item == 'broadcast' for item in item_list)
+    if modified:
+        item_list.append('TV')
+    return item_list
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_and_add_broadcast)
+
+tv_items_set = {item for item in unique_items_set if 'tv' in item.lower()}
+def replace_tv_items(item_list):
+    return ['tv' if item in tv_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_tv_items)
+
+ref_items_set = {item for item in unique_items_set if 'refrigerator' in item.lower()}
+def replace_ref_items(item_list):
+    return ['refrigerator' if item in ref_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_ref_items)
+
+coffee_items_set = {item for item in unique_items_set if 'coffee' in item.lower()}
+def replace_coffee_items(item_list):
+    return ['coffee' if item in coffee_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_coffee_items)
+
+sound_items_set = {item for item in unique_items_set if any(keyword in item for keyword in ['sound system', 'Bluetooth'])}
+def replace_sound_items(item_list):
+    item_list = ['sound system' if item in sound_items_set else item for item in item_list]
+    return item_list
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_sound_items)
+
+stove_items_set = {item for item in unique_items_set if 'stove' in item.lower()}
+def replace_stove_items(item_list):
+    return ['stove' if item in stove_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_stove_items)
+
+cond_items_set = {item for item in unique_items_set if 'conditioner' in item.lower()}
+def replace_cond_items(item_list):
+    return ['conditioner' if item in cond_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_cond_items)
+
+park_items_set = {item for item in unique_items_set if 'parking' in item.lower()}
+def replace_park_items(item_list):
+    return ['parking' if item in park_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_park_items)
+
+clothing_items_set = {item for item in unique_items_set if 'clothing storage' in item.lower()}
+def replace_clothing_items(item_list):
+    return ['clothing storage' if item in clothing_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_clothing_items)
+
+exercise_items_set = {item for item in unique_items_set if 'exercise equipment' in item.lower()}
+def replace_exercise_items(item_list):
+    return ['exercise equipment' if item in exercise_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_exercise_items)
+
+children_items_set = {item for item in unique_items_set if 'children' in item.lower()}
+def replace_children_items(item_list):
+    return ['toys children' if item in children_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_children_items)
+
+bbq_items_set = {item for item in unique_items_set if 'bbq' in item.lower()}
+def replace_bbq_items(item_list):
+    return ['bbq' if item in bbq_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_bbq_items)
+
+pool_items_set = {item for item in unique_items_set if 'pool' in item.lower()}
+def replace_pool_items(item_list):
+    return ['pool' if item in pool_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_pool_items)
+
+hot_items_set = {item for item in unique_items_set if 'hot tub' in item.lower()}
+def replace_hot_items(item_list):
+    return ['hot tub' if item in hot_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_hot_items)
+
+backyard_items_set = {item for item in unique_items_set if 'backyard' in item.lower()}
+def replace_backyard_items(item_list):
+    return ['backyard' if item in backyard_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_backyard_items)
+
+gym_items_set = {item for item in unique_items_set if 'gym' in item.lower()}
+def replace_gym_items(item_list):
+    return ['gym' if item in gym_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_gym_items)
+
+view_items_set = {item for item in unique_items_set if 'view' in item.lower()}
+def replace_view_items(item_list):
+    return ['view' if item in view_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_view_items)
+
+crib_items_set = {item for item in unique_items_set if 'crib' in item.lower()}
+def replace_crib_items(item_list):
+    return ['crib' if item in crib_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_crib_items)
+
+gc_items_set = {item for item in unique_items_set if 'game console' in item.lower()}
+def replace_gc_items(item_list):
+    return ['game console' if item in gc_items_set else item for item in item_list]
+dataframe1["amenities"] = dataframe1["amenities"].apply(replace_gc_items)
+#will all the ones listed above we already grouped the most common words/amenities under 1 word
+
+#last step to clean the amenities is removing the ones that do not appear 100 times or more in the column
+flat_list = [word for sublist in dataframe1["amenities"] for word in sublist]
+word_counts = Counter(flat_list)
+filtered_word_set = {word for word, count in word_counts.items() if count < 100}
+common_elements = list(filtered_word_set & unique_items_set)
+def remove_common_elements(item_list):
+    return [item for item in item_list if item not in common_elements]
+dataframe1['amenities'] = dataframe1['amenities'].apply(remove_common_elements)
+#only 132 unique items left, which is an acceptable amount and now we can make columns out of these ones filled with 0 or 1 depending if they have it or not, this will be easier to use
+
+#making new columns for the amenities indivually with a 0 or 1 inside of them 
+for item in unique_items_set:
+    dataframe1[item] = dataframe1["amenities"].apply(lambda x: int(item in x))
+#now we will be able to remove the 'amenities' column
+dataframe1 = dataframe1.drop('amenities', axis=1)
